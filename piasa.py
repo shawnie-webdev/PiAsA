@@ -163,29 +163,32 @@ def apply_composite() -> None:
         write_text(config_strings / "configuration", "PiAsA composite")
         write_text(config / "MaxPower", "250")
 
-        for index, (name, dev) in enumerate(data["devices"].items()):
+        type_counts = {"hid": 0, "serial": 0, "ethernet": 0, "storage": 0}
+        for name, dev in data["devices"].items():
             kind = dev["type"]
+            index = type_counts[kind]
+            type_counts[kind] += 1
             if kind == "hid":
-                function = gadget / f"functions/hid.{index}"
+                function = gadget / f"functions/hid.usb{index}"
                 function.mkdir(parents=True)
                 write_text(function / "protocol", str(dev.get("protocol", 1)))
                 write_text(function / "subclass", str(dev.get("subclass", 1)))
                 write_text(function / "report_length", str(dev.get("report_length", 8)))
                 (function / "report_desc").write_bytes(hid_descriptor(dev))
             elif kind == "serial":
-                function = gadget / f"functions/acm.{index}"
+                function = gadget / f"functions/acm.usb{index}"
                 function.mkdir(parents=True)
             elif kind == "ethernet":
                 mode = dev.get("function", "ecm")
                 if mode not in {"ecm", "rndis"}:
                     fail(f"ethernet device '{name}': function must be ecm or rndis")
-                function = gadget / f"functions/{mode}.{index}"
+                function = gadget / f"functions/{mode}.usb{index}"
                 function.mkdir(parents=True)
             elif kind == "storage":
                 backing = dev.get("backing_file")
                 if not backing or not Path(backing).is_file():
                     fail(f"storage device '{name}' needs backing_file=/path/to/disk.img")
-                function = gadget / f"functions/mass_storage.{index}"
+                function = gadget / f"functions/mass_storage.usb{index}"
                 function.mkdir(parents=True)
                 lun = function / "lun.0"
                 write_text(lun / "file", str(Path(backing).resolve()))
