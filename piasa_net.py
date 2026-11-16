@@ -46,7 +46,7 @@ def setup(device):
     except ValueError:
         raise RuntimeError("ip_address must be CIDR, e.g. 192.168.7.1/24")
     old_forward = Path("/proc/sys/net/ipv4/ip_forward").read_text().strip()
-    state = {"usb": usb, "mode": mode, "old_forward": old_forward, "peer": None}
+    state = {"usb": usb, "mode": mode, "old_forward": old_forward, "peer": None, "usb_address": str(usb_addr)}
     run("ip", "address", "replace", str(usb_addr), "dev", usb)
     run("ip", "link", "set", usb, "up")
 
@@ -107,4 +107,7 @@ def teardown():
     peer = state.get("peer")
     if peer:
         subprocess.run(["ip", "address", "del", "192.168.8.1/30", "dev", peer], check=False, capture_output=True)
+    usb, usb_address = state.get("usb"), state.get("usb_address")
+    if usb and usb_address:
+        subprocess.run(["ip", "address", "del", usb_address, "dev", usb], check=False, capture_output=True)
     STATE.unlink(missing_ok=True)
