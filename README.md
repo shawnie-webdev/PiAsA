@@ -52,6 +52,9 @@ This creates a local configuration. It does **not** activate the USB gadget yet.
 | `piasa composite show` | Display configuration, nmcli-style |
 | `piasa composite add device NAME --type TYPE` | Add a named function |
 | `piasa composite NAME key=value ...` | Set device properties |
+| `piasa composite SERIAL send="text"` | Send text over a CDC ACM serial function |
+| `piasa composite SERIAL listen timeout=1000` | Wait for serial data (timeout in ms) |
+| `piasa composite ETHERNET sendtarget` | Start the selected Ethernet mode |
 | `piasa composite apply` | Apply configuration to configfs and bind a UDC |
 | `piasa composite down` | Unbind and remove the active gadget |
 | `piasa composite reset` | Remove the saved configuration (only while inactive) |
@@ -100,6 +103,30 @@ piasa composite network dev_mac_address=02:11:22:33:44:55 host_mac_address=02:11
 
 The shorter `mac_address` alias sets the device-side address. MAC addresses must be valid six-byte hexadecimal addresses.
 
+### Serial runtime commands
+
+```sh
+piasa composite console bandwidth=9600
+piasa composite console send="hello!"
+piasa composite console listen timeout=1000
+```
+
+The send/listen commands use the local gadget TTY (for example `/dev/ttyGS0`). The host must have opened its corresponding serial port. `listen` waits up to the supplied timeout in milliseconds and prints received bytes. The configured baud rate is applied to the local TTY; set the same rate in the host's serial application.
+
+### Ethernet modes
+
+Configure the USB Ethernet function's mode and start it after applying the composite gadget:
+
+```sh
+piasa composite network type=piasa-router dns_upstream=1.1.1.1
+sudo piasa composite apply
+sudo piasa composite network sendtarget
+```
+
+Supported mode names: `relay`, `peertopeer`, `pctorouter`, `loopback`, and `piasa-router`. The first `piasa-router` implementation assigns the USB-side Pi interface `192.168.7.1/24` and starts a UDP/TCP DNS forwarder on port 53. Configure the USB host with a static address in that subnet and DNS server `192.168.7.1`. DHCP and general IP routing are not included yet. Set `dns_upstream=1.1.1.1` to choose another resolver.
+
+The other Ethernet modes are accepted as configuration values, but their forwarding/bridging runtime is not implemented in this initial release.
+
 ## Apply
 
 Applying changes system USB gadget state and requires root. Make sure the Pi is connected to the host through a gadget-capable USB port.
@@ -118,7 +145,8 @@ The active gadget is created at `/sys/kernel/config/usb_gadget/piasa`. The confi
 
 ## Safety and limitations
 
-- PiAsA currently configures HID descriptors, but does not yet provide the requested keyboard typing/key-combination or mouse movement/button action commands. Those require a running HID gadget and a report writer connected to its /dev/hidg* node.
+- PiAsA currently configures HID descriptors, but does not yet provide keyboard typing/key-combination or mouse movement/button action commands.
+- `piasa-router` is currently DNS forwarding only. It does not provide DHCP, NAT, or general IP routing.
 - Storage uses an existing image file. Do not modify the same backing image from the Pi and host simultaneously.
 - UDC availability, supported function drivers, host OS compatibility, and board wiring vary.
 - The initial release supports keyboard/mouse HID descriptors, serial, ECM/RNDIS networking, and mass storage. UVC webcam gadget support (screen, video-file, or image sources) is not implemented yet.
