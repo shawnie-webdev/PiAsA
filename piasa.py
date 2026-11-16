@@ -8,6 +8,11 @@ import json
 import os
 import re
 import shutil
+import socket
+import select
+import subprocess
+import termios
+import time
 import sys
 from pathlib import Path
 
@@ -96,8 +101,35 @@ def set_device(name: str, assignments: list[str]) -> None:
                 fail(f"template '{value}' requires type '{template['type']}', not '{device['type']}'")
             device.update(template)
             device["template"] = value
-        elif key in {"name", "function", "backing_file", "readonly", "protocol", "subclass", "report_length", "report_desc", "mac_address", "host_mac_address", "dev_mac_address"}:
-            if key in {"protocol", "subclass", "report_length"}:
+        elif key in {"name", "function", "backing_file", "readonly", "protocol", "subclass", "report_length", "report_desc", "mac_address", "host_mac_address", "dev_mac_address", "mode", "relaywho", "target", "bandwidth", "dns_upstream", "ip_address"} or key == "type":
+            if key == "type":
+                if device.get("type") != "ethernet":
+                    fail("type=... is an Ethernet mode and requires an ethernet device")
+                key = "mode"
+                value = value.lower()
+                if value not in {"relay", "peertopeer", "pctorouter", "loopback", "piasa-router"}:
+                    fail("Ethernet modes: relay, peertopeer, pctorouter, loopback, piasa-router")
+                device[key] = value
+            elif key == "mode":
+                value = value.lower()
+                if value not in {"relay", "peertopeer", "pctorouter", "loopback", "piasa-router"}:
+                    fail("Ethernet modes: relay, peertopeer, pctorouter, loopback, piasa-router")
+                device[key] = value
+            elif key == "bandwidth":
+                if device.get("type") != "serial":
+                    fail("bandwidth is only valid for serial devices")
+                try:
+                    baud = int(value, 10)
+                except ValueError:
+                    fail("bandwidth must be an integer baud rate")
+                if baud not in {50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400}:
+                    fail("unsupported baud rate")
+                device[key] = baud
+            elif key in {"relaywho", "target", "dns_upstream", "ip_address"}:
+                if device.get("type") != "ethernet":
+                    fail(f"{key} is only valid for ethernet devices")
+                device[key] = value
+            elif key in {"protocol", "subclass", "report_length"}:
                 try:
                     device[key] = int(value, 0)
                 except ValueError:
@@ -122,6 +154,124 @@ GLOBAL_PROPERTIES = {
     "device_class": "bDeviceClass", "device_subclass": "bDeviceSubClass",
     "device_protocol": "bDeviceProtocol",
 }
+
+def serial_path(data: dict, name: str) -> Path:
+    names = [n for n, d in data["devices"].items() if d.get("type") == "serial"]
+    if name not in names:
+        fail(f"'{name}' is not a serial device")
+    return Path(f"/dev/ttyGS{names.index(name)}")
+
+def serial_open(data: dict, name: str) -> int:
+    dev = data["devices"][name]
+    path = serial_path(data, name)
+    if not path.exists():
+        fail(f"{path} is unavailable; apply the gadget and open the host serial port")
+    baud = int(dev.get("bandwidth", 9600))
+    speed = getattr(termios, f"B{baud}", None)
+    if speed is None:
+        fail(f"baud rate {baud} is not supported on this system")
+    fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    attrs = termios.tcgetattr(fd)
+    attrs[4] = speed
+    attrs[5] = speed
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    return fd
+
+def serial_send(name: str, payload: str) -> None:
+    data = load_config()
+    dev = data["devices"].get(name)
+    if not dev or dev.get("type") != "serial":
+        fail(f"'{name}' is not a configured serial device")
+    fd = serial_open(data, name)
+    try:
+        count = os.write(fd, payload.encode("utf-8"))
+        print(f"sent {count} byte(s) through {name}")
+    except OSError as exc:
+        fail(f"serial write failed: {exc}", 1)
+    finally:
+        os.close(fd)
+
+def serial_listen(name: str, timeout_ms: int) -> None:
+    data = load_config()
+    dev = data["devices"].get(name)
+    if not dev or dev.get("type") != "serial":
+        fail(f"'{name}' is not a configured serial device")
+    fd = serial_open(data, name)
+    try:
+        ready, _, _ = select.select([fd], [], [], timeout_ms / 1000)
+        if not ready:
+            print("timeout: no serial response received")
+            return
+        chunks = []
+        while True:
+            try:
+                part = os.read(fd, 4096)
+            except BlockingIOError:
+                break
+            if not part:
+                break
+            chunks.append(part)
+            ready, _, _ = select.select([fd], [], [], 0.05)
+            if not ready:
+                break
+        sys.stdout.buffer.write(b"".join(chunks))
+        if chunks and not b"".join(chunks).endswith(b"\\n"):
+            sys.stdout.buffer.write(b"\\n")
+        sys.stdout.buffer.flush()
+    finally:
+        os.close(fd)
+
+def start_dns_proxy(bind_ip: str, upstream: str) -> None:
+    pidfile = CONFIG_DIR / "dns-proxy.pid"
+    if pidfile.exists():
+        try:
+            pid = int(pidfile.read_text().strip())
+            os.kill(pid, 0)
+            print(f"DNS forwarder already running (PID {pid})")
+            return
+        except (ValueError, OSError):
+            pidfile.unlink(missing_ok=True)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "piasa_dns", "--listen", bind_ip, "--upstream", upstream],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True, close_fds=True,
+    )
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text(str(proc.pid) + "\\n")
+    time.sleep(0.15)
+    if proc.poll() is not None:
+        pidfile.unlink(missing_ok=True)
+        fail("DNS forwarder failed to start; UDP/TCP port 53 may already be in use")
+    print(f"DNS forwarder started on {bind_ip}:53 -> {upstream}:53 (PID {proc.pid})")
+
+def ethernet_sendtarget(name: str) -> None:
+    require_root()
+    data = load_config()
+    dev = data["devices"].get(name)
+    if not dev or dev.get("type") != "ethernet":
+        fail(f"'{name}' is not a configured ethernet device")
+    gadget = GADGET_ROOT / "piasa"
+    if not (gadget / "UDC").exists() or not (gadget / "UDC").read_text().strip():
+        fail("apply the composite gadget before running sendtarget")
+    mode = dev.get("mode")
+    if mode != "piasa-router":
+        fail(f"sendtarget runtime for '{mode or 'unset'}' is not implemented yet; piasa-router DNS mode is available")
+    iface = next((p.name for p in Path("/sys/class/net").iterdir()
+                  if p.name.startswith(("usb", "enx"))), None)
+    if not iface:
+        fail("could not find the USB gadget network interface; inspect 'ip link'")
+    address = dev.get("ip_address", "192.168.7.1/24")
+    upstream = dev.get("dns_upstream", "1.1.1.1")
+    try:
+        subprocess.run(["ip", "address", "replace", address, "dev", iface], check=True)
+        subprocess.run(["ip", "link", "set", iface, "up"], check=True)
+    except FileNotFoundError:
+        fail("the 'ip' command is required")
+    except subprocess.CalledProcessError as exc:
+        fail(f"could not configure {iface}: {exc}", 1)
+    start_dns_proxy(address.split("/", 1)[0], upstream)
+    print("Configure the USB host with a static address in the USB subnet and DNS server " + address.split("/", 1)[0])
+    print("piasa-router currently provides DNS forwarding only; DHCP and general routing are not included.")
 
 def set_global(assignments: list[str]) -> None:
     data = load_config()
@@ -300,6 +450,24 @@ Templates: keyboard, mouse, serial, ethernet, rndis, storage
         apply_composite()
     elif args[1] == "down":
         down_composite()
+    elif len(args) >= 3 and args[2] == "sendtarget":
+        ethernet_sendtarget(args[1])
+    elif len(args) >= 3 and args[2] == "send":
+        payload = args[3] if len(args) > 3 else ""
+        if payload.startswith("text="):
+            payload = payload.split("=", 1)[1]
+        elif payload.startswith("send="):
+            payload = payload.split("=", 1)[1]
+        serial_send(args[1], payload)
+    elif len(args) >= 3 and args[2] == "listen":
+        options = parse_assignments(args[3:])
+        try:
+            timeout_ms = int(options.get("timeout", "1000"), 10)
+        except ValueError:
+            fail("listen timeout must be milliseconds")
+        if timeout_ms < 0:
+            fail("listen timeout cannot be negative")
+        serial_listen(args[1], timeout_ms)
     elif args[1] == "reset":
         if (GADGET_ROOT / "piasa").exists():
             fail("stop the active gadget with 'piasa composite down' first")
