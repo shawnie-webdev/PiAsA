@@ -80,6 +80,26 @@ piasa composite add device disk --type storage
 piasa composite disk template=storage backing_file=/path/to/disk.img readonly=true
 ```
 
+## USB descriptors and Ethernet MAC addresses
+
+Set descriptors on the composite device before applying it:
+
+```sh
+piasa composite vendor_id=0x1234 product_id=0x5678
+piasa composite manufacturer="My Lab" product="PiAsA Test Gadget" serial=PIASA0002
+piasa composite bcd_device=0x0101 bcd_usb=0x0200
+```
+
+Supported global properties are `vendor_id`, `product_id`, `manufacturer`, `product`, `serial`, `bcd_device`, `bcd_usb`, `device_class`, `device_subclass`, and `device_protocol`. Numeric descriptor values accept decimal or hexadecimal notation.
+
+For ECM/RNDIS network functions, configure the device-side and host-side MAC addresses:
+
+```sh
+piasa composite network dev_mac_address=02:11:22:33:44:55 host_mac_address=02:11:22:33:44:66
+```
+
+The shorter `mac_address` alias sets the device-side address. MAC addresses must be valid six-byte hexadecimal addresses.
+
 ## Apply
 
 Applying changes system USB gadget state and requires root. Make sure the Pi is connected to the host through a gadget-capable USB port.
@@ -98,7 +118,7 @@ The active gadget is created at `/sys/kernel/config/usb_gadget/piasa`. The confi
 
 ## Safety and limitations
 
-- PiAsA only configures the local Linux gadget. It does not inject keystrokes or mouse actions; HID input transport/application logic is outside this initial release.
+- PiAsA currently configures HID descriptors, but does not yet provide the requested keyboard typing/key-combination or mouse movement/button action commands. Those require a running HID gadget and a report writer connected to its /dev/hidg* node.
 - Storage uses an existing image file. Do not modify the same backing image from the Pi and host simultaneously.
 - UDC availability, supported function drivers, host OS compatibility, and board wiring vary.
-- The initial release supports keyboard/mouse HID descriptors, serial, ECM/RNDIS networking, and mass storage. UVC video/audio gadget support is not implemented yet.
+- The initial release supports keyboard/mouse HID descriptors, serial, ECM/RNDIS networking, and mass storage. UVC webcam gadget support (screen, video-file, or image sources) is not implemented yet.
