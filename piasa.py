@@ -233,6 +233,80 @@ def serial_listen(name: str, timeout_ms: int) -> None:
     finally:
         os.close(fd)
 
+HID_MODIFIERS = {"CTRL":1,"CONTROL":1,"SHIFT":2,"ALT":4,"GUI":8,"WIN":8,"META":8,"RIGHTCTRL":16,"RIGHTSHIFT":32,"RIGHTALT":64,"RIGHTGUI":128}
+HID_KEYS = {"ENTER":0x28,"RETURN":0x28,"ESC":0x29,"ESCAPE":0x29,"BACKSPACE":0x2a,"TAB":0x2b,"SPACE":0x2c,"CAPSLOCK":0x39,"F1":0x3a,"F2":0x3b,"F3":0x3c,"F4":0x3d,"F5":0x3e,"F6":0x3f,"F7":0x40,"F8":0x41,"F9":0x42,"F10":0x43,"F11":0x44,"F12":0x45,"INSERT":0x49,"HOME":0x4a,"PAGEUP":0x4b,"DELETE":0x4c,"END":0x4d,"PAGEDOWN":0x4e,"RIGHT":0x4f,"LEFT":0x50,"DOWN":0x51,"UP":0x52}
+for _letter,_usage in zip("abcdefghijklmnopqrstuvwxyz",range(0x04,0x1e)):
+    HID_KEYS[_letter.upper()]=_usage
+for _char,_usage in zip("1234567890",range(0x1e,0x28)):
+    HID_KEYS[_char]=_usage
+HID_CHARACTERS={}
+for _letter,_usage in zip("abcdefghijklmnopqrstuvwxyz",range(0x04,0x1e)):
+    HID_CHARACTERS[_letter]=(0,_usage)
+    HID_CHARACTERS[_letter.upper()]=(2,_usage)
+for _char,_usage in zip("1234567890",range(0x1e,0x28)):
+    HID_CHARACTERS[_char]=(0,_usage)
+for _char,_shifted in {"!":"1","@":"2","#":"3","$":"4","%":"5","^":"6","&":"7","*":"8","(":"9",")":"0"}.items():
+    HID_CHARACTERS[_char]=(2,HID_KEYS[_shifted])
+for _char,_usage,_shifted in [
+    (" ",0x2c,False),("-",0x2d,False),("_",0x2d,True),("=",0x2e,False),("+",0x2e,True),
+    ("[",0x2f,False),("{",0x2f,True),("]",0x30,False),("}",0x30,True),
+    ("\\",0x31,False),("|",0x31,True),(";",0x33,False),(":",0x33,True),
+    ("'",0x34,False),('"',0x34,True),("~",0x35,True),(",",0x36,False),
+    ("<",0x36,True),(".",0x37,False),(">",0x37,True),("/",0x38,False),("?",0x38,True)]:
+    HID_CHARACTERS[_char]=(2 if _shifted else 0,_usage)
+
+def hid_keyboard_path(data: dict, name: str = None) -> Path:
+    names=[n for n,d in data["devices"].items() if d.get("type")=="hid" and d.get("template")=="keyboard"]
+    if not names: fail("no configured keyboard HID device; configure one with template=keyboard")
+    if name is None:
+        if len(names)!=1: fail("multiple keyboards configured; specify --device NAME")
+        name=names[0]
+    if name not in names: fail(f"'{name}' is not a configured keyboard HID device")
+    path=Path(f"/dev/hidg{names.index(name)}")
+    if not path.exists(): fail(f"{path} is unavailable; apply the gadget and connect the host first")
+    return path
+
+def hid_send_report(fd: int, modifier: int=0, keycode: int=0) -> None:
+    report=bytes((modifier,0,keycode,0,0,0,0,0))
+    if os.write(fd,report)!=len(report): fail("short write to HID keyboard endpoint",1)
+
+def hid_tap(fd: int, modifier: int, keycode: int) -> None:
+    hid_send_report(fd,modifier,keycode)
+    time.sleep(0.01)
+    hid_send_report(fd)
+    time.sleep(0.01)
+
+def keyboard_key(name: str, chord: str) -> None:
+    require_root()
+    path=hid_keyboard_path(load_config(),name)
+    parts=[p.strip().upper() for p in chord.split("+") if p.strip()]
+    if not parts: fail("specify a key, such as ENTER, UP, or CTRL+C")
+    modifier=0
+    for part in parts[:-1]:
+        if part not in HID_MODIFIERS: fail(f"unknown modifier '{part}'")
+        modifier|=HID_MODIFIERS[part]
+    key=parts[-1]
+    if key not in HID_KEYS: fail(f"unknown key '{key}'; arrow keys: UP, DOWN, LEFT, RIGHT")
+    fd=os.open(path,os.O_WRONLY)
+    try: hid_tap(fd,modifier,HID_KEYS[key])
+    except OSError as exc: fail(f"keyboard write failed: {exc}",1)
+    finally: os.close(fd)
+
+def keyboard_type(name: str, text: str) -> None:
+    require_root()
+    path=hid_keyboard_path(load_config(),name)
+    fd=os.open(path,os.O_WRONLY)
+    try:
+        for char in text:
+            if char in ("\n","\r"): modifier,keycode=0,HID_KEYS["ENTER"]
+            elif char=="\t": modifier,keycode=0,HID_KEYS["TAB"]
+            elif char in HID_CHARACTERS: modifier,keycode=HID_CHARACTERS[char]
+            else: fail(f"cannot type {char!r}; only basic US-layout ASCII is supported")
+            hid_tap(fd,modifier,keycode)
+    except OSError as exc: fail(f"keyboard write failed: {exc}",1)
+    finally: os.close(fd)
+    print(f"typed {len(text)} character(s) using {path}")
+
 def start_dns_proxy(bind_ip: str, upstream: str) -> None:
     pidfile = CONFIG_DIR / "dns-proxy.pid"
     if pidfile.exists():
@@ -504,6 +578,8 @@ Usage:
   piasa composite SERIAL send="text"
   piasa composite SERIAL listen timeout=1000
   piasa composite ETHERNET sendtarget
+  piasa keyboard type TEXT [--device NAME]
+  piasa keyboard key KEY [--device NAME]
   piasa composite vendor_id=0x1234 product_id=0x5678 [manufacturer=NAME ...]
   piasa composite show
   piasa composite apply
@@ -514,6 +590,21 @@ Types: hid, serial, ethernet, storage
 Templates: keyboard, mouse, serial, ethernet, rndis, storage
 Ethernet modes: relay, peertopeer, pctorouter, loopback, piasa-router
 """)
+        return
+    if args[0] == "keyboard":
+        parser = argparse.ArgumentParser(prog="piasa keyboard")
+        sub = parser.add_subparsers(dest="action", required=True)
+        tp = sub.add_parser("type", help="type text on the connected host")
+        tp.add_argument("text", nargs="+")
+        tp.add_argument("--device", default=None)
+        kp = sub.add_parser("key", help="tap a key or modifier chord")
+        kp.add_argument("chord")
+        kp.add_argument("--device", default=None)
+        parsed = parser.parse_args(args[1:])
+        if parsed.action == "type":
+            keyboard_type(parsed.device, " ".join(parsed.text))
+        else:
+            keyboard_key(parsed.device, parsed.chord)
         return
     if args[0] != "composite":
         fail(f"unknown command '{args[0]}'")
