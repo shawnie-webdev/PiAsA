@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "piasa"
+version = "0.1.0"
+description = "Configure Linux USB composite gadgets on Raspberry Pi"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "PiAsA contributors" }]
+
+[project.scripts]
+piasa = "piasa:main"
+
+[tool.setuptools]
+py-modules = ["piasa"]
