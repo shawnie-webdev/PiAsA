@@ -344,6 +344,19 @@ def hid_descriptor(device: dict) -> bytes:
     except (KeyError, ValueError):
         fail(f"HID device '{device['name']}' needs a valid report_desc; choose template=keyboard or template=mouse")
 
+def remove_configfs_tree(path: Path) -> None:
+    """Remove configfs objects without unlinking their virtual attribute files."""
+    if not path.exists():
+        return
+    for entry in os.scandir(path):
+        child = Path(entry.path)
+        if entry.is_symlink():
+            child.unlink()
+        elif entry.is_dir(follow_symlinks=False):
+            remove_configfs_tree(child)
+        # Configfs attribute files are virtual and must not be unlinked.
+    path.rmdir()
+
 def apply_composite() -> None:
     require_root()
     data = load_config()
@@ -420,7 +433,10 @@ def apply_composite() -> None:
     except Exception:
         try:
             if gadget.exists():
-                shutil.rmtree(gadget)
+                udc = gadget / "UDC"
+                if udc.exists():
+                    write_text(udc, "")
+                remove_configfs_tree(gadget)
         except OSError:
             pass
         raise
@@ -452,7 +468,7 @@ def down_composite() -> None:
     udc = gadget / "UDC"
     if udc.exists():
         write_text(udc, "")
-    shutil.rmtree(gadget)
+    remove_configfs_tree(gadget)
     print("success: composite gadget stopped")
 
 def main() -> None:
