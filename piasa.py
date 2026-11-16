@@ -345,17 +345,35 @@ def hid_descriptor(device: dict) -> bytes:
         fail(f"HID device '{device['name']}' needs a valid report_desc; choose template=keyboard or template=mouse")
 
 def remove_configfs_tree(path: Path) -> None:
-    """Remove configfs objects without unlinking their virtual attribute files."""
+    """Remove a configfs gadget safely: unlink references before removing objects."""
     if not path.exists():
         return
-    for entry in os.scandir(path):
-        child = Path(entry.path)
-        if entry.is_symlink():
-            child.unlink()
-        elif entry.is_dir(follow_symlinks=False):
-            remove_configfs_tree(child)
-        # Configfs attribute files are virtual and must not be unlinked.
-    path.rmdir()
+
+    directories = []
+    symlinks = []
+
+    def collect(current: Path) -> None:
+        directories.append(current)
+        with os.scandir(current) as entries:
+            for entry in entries:
+                child = Path(entry.path)
+                if entry.is_symlink():
+                    symlinks.append(child)
+                elif entry.is_dir(follow_symlinks=False):
+                    collect(child)
+                # Configfs attribute files are virtual and must not be unlinked.
+
+    collect(path)
+
+    # A function instance cannot be removed while a config still links to it.
+    for link in symlinks:
+        if link.is_symlink():
+            link.unlink()
+
+    # Remove configfs groups from the deepest child back to the gadget root.
+    for directory in reversed(directories):
+        if directory.exists():
+            directory.rmdir()
 
 def apply_composite() -> None:
     require_root()
