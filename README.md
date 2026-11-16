@@ -8,19 +8,13 @@ It stores a declarative configuration first, then applies it to Linux configfs w
 
 ## Install
 
-The easiest option is the per-user installer. From the cloned repository:
+The installer sets up PiAsA system-wide. From the cloned repository:
 
 ```sh
 bash install.sh
 ```
 
-It creates an isolated Python virtual environment at `~/.local/share/piasa/venv`, installs PiAsA there, and places the `piasa` command in `~/.local/bin`. It does not need sudo and does not modify your system Python.
-
-If `piasa` is not found after installation, add this to your shell profile and open a new terminal:
-
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-```
+It creates a root-owned virtual environment at `/opt/piasa/venv` and installs the `piasa` command in `/usr/local/bin`. This makes `piasa` available both normally and through `sudo piasa`, without relying on the user's home-directory PATH. The installer asks for sudo permission when needed and does not modify system Python.
 
 To update, pull the latest repository changes and run `bash install.sh` again. To uninstall the application (your PiAsA configuration is preserved):
 
