@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pwd
 import re
 import shutil
 import socket
@@ -17,7 +18,13 @@ import sys
 from pathlib import Path
 
 APP = "PiAsA"
-CONFIG_DIR = Path(os.environ.get("PIASA_CONFIG_DIR", Path.home() / ".config/piasa"))
+_config_default = Path.home() / ".config/piasa"
+if os.geteuid() == 0 and os.environ.get("SUDO_USER"):
+    try:
+        _config_default = Path(pwd.getpwnam(os.environ["SUDO_USER"]).pw_dir) / ".config/piasa"
+    except KeyError:
+        pass
+CONFIG_DIR = Path(os.environ.get("PIASA_CONFIG_DIR", _config_default))
 CONFIG_FILE = CONFIG_DIR / "composite.json"
 GADGET_ROOT = Path("/sys/kernel/config/usb_gadget")
 DEFAULT_ID = "0x0100"
@@ -410,8 +417,21 @@ def apply_composite() -> None:
             pass
         raise
 
+def stop_dns_proxy() -> None:
+    pidfile = CONFIG_DIR / "dns-proxy.pid"
+    if not pidfile.exists():
+        return
+    try:
+        pid = int(pidfile.read_text().strip())
+        os.kill(pid, 15)
+    except (ValueError, OSError):
+        pass
+    pidfile.unlink(missing_ok=True)
+
+
 def down_composite() -> None:
     require_root()
+    stop_dns_proxy()
     gadget = GADGET_ROOT / "piasa"
     if not gadget.exists():
         print("info: composite gadget is not active")
@@ -434,6 +454,9 @@ Usage:
   piasa --init composite
   piasa composite add device NAME --type TYPE
   piasa composite NAME key=value [key=value ...]
+  piasa composite SERIAL send="text"
+  piasa composite SERIAL listen timeout=1000
+  piasa composite ETHERNET sendtarget
   piasa composite vendor_id=0x1234 product_id=0x5678 [manufacturer=NAME ...]
   piasa composite show
   piasa composite apply
@@ -442,6 +465,7 @@ Usage:
 
 Types: hid, serial, ethernet, storage
 Templates: keyboard, mouse, serial, ethernet, rndis, storage
+Ethernet modes: relay, peertopeer, pctorouter, loopback, piasa-router
 """)
         return
     if args[0] != "composite":
