@@ -15,4 +15,4 @@ authors = [{ name = "PiAsA contributors" }]
 piasa = "piasa:main"
 
 [tool.setuptools]
-py-modules = ["piasa"]
+py-modules = ["piasa", "piasa_dns"]
