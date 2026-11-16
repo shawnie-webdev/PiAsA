@@ -163,3 +163,16 @@ The active gadget is created at `/sys/kernel/config/usb_gadget/piasa`. The confi
 - Storage uses an existing image file. Do not modify the same backing image from the Pi and host simultaneously.
 - UDC availability, supported function drivers, host OS compatibility, and board wiring vary.
 - The initial release supports keyboard/mouse HID descriptors, serial, ECM/RNDIS networking, and mass storage. UVC webcam gadget support (screen, video-file, or image sources) is not implemented yet.
+
+
+## Ethernet runtime modes
+
+After applying the gadget, activate the selected mode with `sudo piasa composite ETH sendtarget`. Install `iproute2` and `nftables` first. PiAsA creates a dedicated `inet piasa` nftables table and removes only that table on `sudo piasa composite down`.
+
+- `relay relaywho=wlan0`: routed/NAT forwarding from USB to the selected upstream interface. It is not a transparent layer-2 bridge; this avoids assuming Wi-Fi client interfaces support bridging.
+- `pctorouter relaywho=eth0`: routes USB-host traffic through the Pi's upstream router with NAT. Set the USB host's default gateway to the Pi USB-side address (default `192.168.7.1`).
+- `peertopeer relaywho=eth0`: configures the Pi's second interface as `192.168.8.1/30`; configure PC 2 as `192.168.8.2/30`. Configure PC addresses and return routes as needed.
+- `loopback target=127.0.0.1:8080`: redirects TCP/UDP traffic arriving from the USB host to the specified local IPv4 server endpoint. The server must already be listening. Use the Pi's USB-side address instead of 127.0.0.1 if loopback routing is blocked by the host kernel.
+- `piasa-router`: DNS forwarding only; it does not provide general IP routing or DHCP.
+
+Set `usb_interface=usb0` if automatic USB interface detection is ambiguous. Set `ip_address=192.168.7.1/24` to change the USB-side address. These operations configure the Pi only; the connected PCs still need appropriate IP settings. The `down` command removes PiAsA's firewall table, restores the previous IPv4-forwarding setting, and removes addresses configured by PiAsA. Loopback currently redirects TCP and UDP, not arbitrary IP protocols.
