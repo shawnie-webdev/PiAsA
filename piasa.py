@@ -177,7 +177,7 @@ def serial_open(data: dict, name: str) -> int:
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
     return fd
 
-def serial_send(name: str, payload: str, wait_ms: int | None = None) -> None:
+def serial_send(name: str, payload: str, wait_ms=None) -> None:
     data = load_config()
     dev = data["devices"].get(name)
     if not dev or dev.get("type") != "serial":
