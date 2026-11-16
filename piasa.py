@@ -108,7 +108,7 @@ def set_device(name: str, assignments: list[str]) -> None:
                 fail(f"template '{value}' requires type '{template['type']}', not '{device['type']}'")
             device.update(template)
             device["template"] = value
-        elif key in {"name", "function", "backing_file", "readonly", "protocol", "subclass", "report_length", "report_desc", "mac_address", "host_mac_address", "dev_mac_address", "mode", "relaywho", "target", "bandwidth", "dns_upstream", "ip_address"} or key == "type":
+        elif key in {"name", "function", "backing_file", "readonly", "protocol", "subclass", "report_length", "report_desc", "mac_address", "host_mac_address", "dev_mac_address", "mode", "relaywho", "target", "bandwidth", "dns_upstream", "ip_address", "usb_interface"} or key == "type":
             if key == "type":
                 if device.get("type") != "ethernet":
                     fail("type=... is an Ethernet mode and requires an ethernet device")
@@ -132,7 +132,7 @@ def set_device(name: str, assignments: list[str]) -> None:
                 if baud not in {50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400}:
                     fail("unsupported baud rate")
                 device[key] = baud
-            elif key in {"relaywho", "target", "dns_upstream", "ip_address"}:
+            elif key in {"relaywho", "target", "dns_upstream", "ip_address", "usb_interface"}:
                 if device.get("type") != "ethernet":
                     fail(f"{key} is only valid for ethernet devices")
                 device[key] = value
@@ -266,24 +266,32 @@ def ethernet_sendtarget(name: str) -> None:
     if not (gadget / "UDC").exists() or not (gadget / "UDC").read_text().strip():
         fail("apply the composite gadget before running sendtarget")
     mode = dev.get("mode")
-    if mode != "piasa-router":
-        fail(f"sendtarget runtime for '{mode or 'unset'}' is not implemented yet; piasa-router DNS mode is available")
-    iface = next((p.name for p in Path("/sys/class/net").iterdir()
-                  if p.name.startswith(("usb", "enx"))), None)
-    if not iface:
-        fail("could not find the USB gadget network interface; inspect 'ip link'")
-    address = dev.get("ip_address", "192.168.7.1/24")
-    upstream = dev.get("dns_upstream", "1.1.1.1")
+    if mode == "piasa-router":
+        iface = dev.get("usb_interface")
+        if not iface:
+            candidates = [p.name for p in Path("/sys/class/net").iterdir()
+                          if p.name.startswith(("usb", "enx"))]
+            if len(candidates) != 1:
+                fail("cannot uniquely identify USB interface; set usb_interface=NAME")
+            iface = candidates[0]
+        address = dev.get("ip_address", "192.168.7.1/24")
+        upstream = dev.get("dns_upstream", "1.1.1.1")
+        try:
+            subprocess.run(["ip", "address", "replace", address, "dev", iface], check=True)
+            subprocess.run(["ip", "link", "set", iface, "up"], check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+            fail(f"could not configure {iface}: {exc}", 1)
+        start_dns_proxy(address.split("/", 1)[0], upstream)
+        print("Configure the USB host with a static address in the USB subnet and DNS server " + address.split("/", 1)[0])
+        print("DNS forwarding only; general Internet routing is not enabled.")
+        return
+    if mode not in {"relay", "peertopeer", "pctorouter", "loopback"}:
+        fail("set an Ethernet type first: relay, peertopeer, pctorouter, loopback, piasa-router")
     try:
-        subprocess.run(["ip", "address", "replace", address, "dev", iface], check=True)
-        subprocess.run(["ip", "link", "set", iface, "up"], check=True)
-    except FileNotFoundError:
-        fail("the 'ip' command is required")
-    except subprocess.CalledProcessError as exc:
-        fail(f"could not configure {iface}: {exc}", 1)
-    start_dns_proxy(address.split("/", 1)[0], upstream)
-    print("Configure the USB host with a static address in the USB subnet and DNS server " + address.split("/", 1)[0])
-    print("piasa-router currently provides DNS forwarding only; DHCP and general routing are not included.")
+        from piasa_net import setup
+        setup(dev)
+    except (RuntimeError, OSError) as exc:
+        fail(str(exc), 1)
 
 def set_global(assignments: list[str]) -> None:
     data = load_config()
@@ -432,6 +440,11 @@ def stop_dns_proxy() -> None:
 def down_composite() -> None:
     require_root()
     stop_dns_proxy()
+    try:
+        from piasa_net import teardown
+        teardown()
+    except (RuntimeError, OSError) as exc:
+        fail(f"network cleanup failed: {exc}", 1)
     gadget = GADGET_ROOT / "piasa"
     if not gadget.exists():
         print("info: composite gadget is not active")
