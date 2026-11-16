@@ -73,13 +73,25 @@ Supported types: `hid`, `serial`, `ethernet`, `storage`.
 | `rndis` | `ethernet` | USB RNDIS network interface |
 | `storage` | `storage` | USB mass-storage function; set a backing image |
 
-Example additional functions:
+Example additional functions (using the short names from the CLI examples):
 
 ```sh
-piasa composite add device console --type serial
-piasa composite console template=serial
-piasa composite add device network --type ethernet
-piasa composite network template=ethernet
+piasa composite add device serial --type serial
+piasa composite serial template=serial
+piasa composite serial bandwidth=9600
+piasa composite serial send="hello!"
+piasa composite serial listen timeout=1000
+
+piasa composite add device eth --type ethernet
+piasa composite eth template=ethernet
+piasa composite eth type=relay relaywho=wlan0
+piasa composite eth type=peertopeer
+piasa composite eth type=pctorouter
+piasa composite eth target=127.0.0.1:8080
+piasa composite eth type=piasa-router dns_upstream=1.1.1.1
+sudo piasa composite apply
+sudo piasa composite eth sendtarget
+
 piasa composite add device disk --type storage
 piasa composite disk template=storage backing_file=/path/to/disk.img readonly=true
 ```
