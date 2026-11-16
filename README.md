@@ -90,6 +90,18 @@ piasa composite add device disk --type storage
 piasa composite disk template=storage backing_file=/path/to/disk.img readonly=true
 ```
 
+## HID keyboard input
+
+After configuring a HID keyboard and applying the gadget, send input from the Pi:
+
+    sudo piasa keyboard type "Hello world!"
+    sudo piasa keyboard key ENTER
+    sudo piasa keyboard key UP
+    sudo piasa keyboard key CTRL+C
+    sudo piasa keyboard key CTRL+ALT+DELETE
+
+Arrow keys are UP, DOWN, LEFT, and RIGHT. Other named keys include ENTER, TAB, ESC, BACKSPACE, DELETE, HOME, END, PAGEUP, PAGEDOWN, and F1 through F12. Modifier names include CTRL, SHIFT, ALT, and GUI. For multiple keyboards, pass --device NAME. Root is required to write to /dev/hidgX. Typing supports basic US-layout ASCII only; non-ASCII characters are not translated. The host must be connected and ready to receive input.
+
 ## USB descriptors and Ethernet MAC addresses
 
 Set descriptors on the composite device before applying it:
@@ -152,7 +164,7 @@ The active gadget is created at `/sys/kernel/config/usb_gadget/piasa`. The confi
 
 ## Safety and limitations
 
-- PiAsA currently configures HID descriptors, but does not yet provide keyboard typing/key-combination or mouse movement/button action commands.
+- PiAsA supports keyboard typing and key taps/chords through /dev/hidgX; mouse movement/button action commands are not implemented.
 - `piasa-router` is currently DNS forwarding only. It does not provide DHCP, NAT, or general IP routing. It binds TCP and UDP port 53 on the Pi-side USB interface; ensure another DNS service is not already using that address/port.
 - Storage uses an existing image file. Do not modify the same backing image from the Pi and host simultaneously.
 - UDC availability, supported function drivers, host OS compatibility, and board wiring vary.
