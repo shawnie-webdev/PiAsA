@@ -456,9 +456,9 @@ Templates: keyboard, mouse, serial, ethernet, rndis, storage
         payload = args[3] if len(args) > 3 else ""
         if payload.startswith("text="):
             payload = payload.split("=", 1)[1]
-        elif payload.startswith("send="):
-            payload = payload.split("=", 1)[1]
         serial_send(args[1], payload)
+    elif len(args) >= 3 and args[2].startswith("send="):
+        serial_send(args[1], args[2].split("=", 1)[1])
     elif len(args) >= 3 and args[2] == "listen":
         options = parse_assignments(args[3:])
         try:
