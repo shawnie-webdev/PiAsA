@@ -96,7 +96,7 @@ def set_device(name: str, assignments: list[str]) -> None:
                 fail(f"template '{value}' requires type '{template['type']}', not '{device['type']}'")
             device.update(template)
             device["template"] = value
-        elif key in {"name", "function", "backing_file", "readonly", "protocol", "subclass", "report_length", "report_desc"}:
+        elif key in {"name", "function", "backing_file", "readonly", "protocol", "subclass", "report_length", "report_desc", "mac_address", "host_mac_address", "dev_mac_address"}:
             if key in {"protocol", "subclass", "report_length"}:
                 try:
                     device[key] = int(value, 0)
@@ -105,11 +105,43 @@ def set_device(name: str, assignments: list[str]) -> None:
             elif key == "readonly":
                 device[key] = value.lower() in {"1", "yes", "true", "on"}
             else:
+                if key in {"mac_address", "host_mac_address", "dev_mac_address"}:
+                    if not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", value):
+                        fail(f"{key} must look like 02:11:22:33:44:55")
+                    value = value.lower()
                 device[key] = value
         else:
             fail(f"unknown property '{key}'")
     save_config(data)
     print(f"success: updated device '{name}'")
+
+GLOBAL_PROPERTIES = {
+    "vendor_id": "idVendor", "product_id": "idProduct",
+    "manufacturer": "manufacturer", "product": "product", "serial": "serial",
+    "bcd_device": "bcdDevice", "bcd_usb": "bcdUSB",
+    "device_class": "bDeviceClass", "device_subclass": "bDeviceSubClass",
+    "device_protocol": "bDeviceProtocol",
+}
+
+def set_global(assignments: list[str]) -> None:
+    data = load_config()
+    for key, value in parse_assignments(assignments).items():
+        target = GLOBAL_PROPERTIES.get(key)
+        if not target:
+            fail(f"unknown composite property '{key}'")
+        if key in {"vendor_id", "product_id", "bcd_device", "bcd_usb",
+                   "device_class", "device_subclass", "device_protocol"}:
+            try:
+                number = int(value, 0)
+            except ValueError:
+                fail(f"{key} must be an integer, e.g. 0x1d6b")
+            if not 0 <= number <= 0xffff:
+                fail(f"{key} must be between 0 and 65535")
+            data[target] = f"0x{number:04x}"
+        else:
+            data[target] = value
+    save_config(data)
+    print("success: updated composite descriptors")
 
 def show(data: dict) -> None:
     print("GENERAL")
@@ -151,6 +183,9 @@ def apply_composite() -> None:
     try:
         write_text(gadget / "idVendor", data["idVendor"])
         write_text(gadget / "idProduct", data["idProduct"])
+        for prop in ("bcdDevice", "bcdUSB", "bDeviceClass", "bDeviceSubClass", "bDeviceProtocol"):
+            if prop in data:
+                write_text(gadget / prop, data[prop])
         strings = gadget / "strings/0x409"
         strings.mkdir(parents=True)
         write_text(strings / "serialnumber", data["serial"])
@@ -184,6 +219,10 @@ def apply_composite() -> None:
                     fail(f"ethernet device '{name}': function must be ecm or rndis")
                 function = gadget / f"functions/{mode}.usb{index}"
                 function.mkdir(parents=True)
+                if dev.get("dev_mac_address") or dev.get("mac_address"):
+                    write_text(function / "dev_addr", dev.get("dev_mac_address", dev.get("mac_address")))
+                if dev.get("host_mac_address"):
+                    write_text(function / "host_addr", dev["host_mac_address"])
             elif kind == "storage":
                 backing = dev.get("backing_file")
                 if not backing or not Path(backing).is_file():
@@ -235,6 +274,7 @@ Usage:
   piasa --init composite
   piasa composite add device NAME --type TYPE
   piasa composite NAME key=value [key=value ...]
+  piasa composite vendor_id=0x1234 product_id=0x5678 [manufacturer=NAME ...]
   piasa composite show
   piasa composite apply
   piasa composite down
@@ -254,6 +294,8 @@ Templates: keyboard, mouse, serial, ethernet, rndis, storage
         parser.add_argument("--type", required=True)
         parsed = parser.parse_args(args[3:])
         add_device(parsed.name, parsed.type)
+    elif len(args) > 1 and "=" in args[1]:
+        set_global(args[1:])
     elif args[1] == "apply":
         apply_composite()
     elif args[1] == "down":
