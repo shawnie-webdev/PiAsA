@@ -177,19 +177,24 @@ def serial_open(data: dict, name: str) -> int:
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
     return fd
 
-def serial_send(name: str, payload: str) -> None:
+def serial_send(name: str, payload: str, wait_ms: int | None = None) -> None:
     data = load_config()
     dev = data["devices"].get(name)
     if not dev or dev.get("type") != "serial":
         fail(f"'{name}' is not a configured serial device")
     fd = serial_open(data, name)
     try:
-        count = os.write(fd, payload.encode("utf-8"))
-        print(f"sent {count} byte(s) through {name}")
+        raw = payload.encode("utf-8")
+        offset = 0
+        while offset < len(raw):
+            offset += os.write(fd, raw[offset:])
+        print(f"sent {offset} byte(s) through {name}")
     except OSError as exc:
         fail(f"serial write failed: {exc}", 1)
     finally:
         os.close(fd)
+    if wait_ms is not None:
+        serial_listen(name, wait_ms)
 
 def serial_listen(name: str, timeout_ms: int) -> None:
     data = load_config()
@@ -304,7 +309,12 @@ def show(data: dict) -> None:
     if not data["devices"]:
         print("  (none)")
     for name, dev in data["devices"].items():
-        print(f"  {name:<18} type={dev['type']:<10} template={dev.get('template', '-'):<10} name={dev.get('name', name)}")
+        extra = []
+        for key in ("mode", "target", "relaywho", "bandwidth", "dns_upstream"):
+            if key in dev:
+                extra.append(f"{key}={dev[key]}")
+        suffix = (" " + " ".join(extra)) if extra else ""
+        print(f"  {name:<18} type={dev['type']:<10} template={dev.get('template', '-'):<10} name={dev.get('name', name)}{suffix}")
 
 def write_text(path: Path, value: str) -> None:
     path.write_text(str(value))
@@ -458,7 +468,16 @@ Templates: keyboard, mouse, serial, ethernet, rndis, storage
             payload = payload.split("=", 1)[1]
         serial_send(args[1], payload)
     elif len(args) >= 3 and args[2].startswith("send="):
-        serial_send(args[1], args[2].split("=", 1)[1])
+        options = parse_assignments(args[3:])
+        wait_ms = None
+        if "wait" in options:
+            try:
+                wait_ms = int(options["wait"], 10)
+            except ValueError:
+                fail("send wait must be milliseconds")
+            if wait_ms < 0:
+                fail("send wait cannot be negative")
+        serial_send(args[1], args[2].split("=", 1)[1], wait_ms)
     elif len(args) >= 3 and args[2] == "listen":
         options = parse_assignments(args[3:])
         try:
