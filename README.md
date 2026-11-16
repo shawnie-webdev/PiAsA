@@ -8,11 +8,27 @@ It stores a declarative configuration first, then applies it to Linux configfs w
 
 ## Install
 
+The easiest option is the per-user installer. From the cloned repository:
+
 ```sh
-python3 -m pip install .
+bash install.sh
 ```
 
-For development, run `python3 piasa.py --help`.
+It creates an isolated Python virtual environment at `~/.local/share/piasa/venv`, installs PiAsA there, and places the `piasa` command in `~/.local/bin`. It does not need sudo and does not modify your system Python.
+
+If `piasa` is not found after installation, add this to your shell profile and open a new terminal:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+To update, pull the latest repository changes and run `bash install.sh` again. To uninstall the application (your PiAsA configuration is preserved):
+
+```sh
+bash install.sh --uninstall
+```
+
+Manual/development install is also available with `python3 -m pip install .`. For development without installing, run `python3 piasa.py --help`.
 
 ## Quick start
 
