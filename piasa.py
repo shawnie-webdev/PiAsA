@@ -287,7 +287,7 @@ def serial_listen(name: str, timeout_ms: int) -> None:
     finally:
         os.close(fd)
 
-HID_MODIFIERS = {"CTRL":1,"CONTROL":1,"SHIFT":2,"ALT":4,"GUI":8,"WIN":8,"META":8,"RIGHTCTRL":16,"RIGHTSHIFT":32,"RIGHTALT":64,"RIGHTGUI":128}
+HID_MODIFIERS = {"CTRL":1,"CONTROL":1,"SHIFT":2,"ALT":4,"GUI":8,"WIN":8,"WINDOWS":8,"SUPER":8,"META":8,"RIGHTCTRL":16,"RIGHTSHIFT":32,"RIGHTALT":64,"RIGHTGUI":128}
 HID_KEYS = {"ENTER":0x28,"RETURN":0x28,"ESC":0x29,"ESCAPE":0x29,"BACKSPACE":0x2a,"TAB":0x2b,"SPACE":0x2c,"CAPSLOCK":0x39,"F1":0x3a,"F2":0x3b,"F3":0x3c,"F4":0x3d,"F5":0x3e,"F6":0x3f,"F7":0x40,"F8":0x41,"F9":0x42,"F10":0x43,"F11":0x44,"F12":0x45,"INSERT":0x49,"HOME":0x4a,"PAGEUP":0x4b,"DELETE":0x4c,"END":0x4d,"PAGEDOWN":0x4e,"RIGHT":0x4f,"LEFT":0x50,"DOWN":0x51,"UP":0x52}
 for _letter,_usage in zip("abcdefghijklmnopqrstuvwxyz",range(0x04,0x1e)):
     HID_KEYS[_letter.upper()]=_usage
@@ -335,14 +335,21 @@ def keyboard_key(name: str, chord: str) -> None:
     path=hid_keyboard_path(load_config(),name)
     parts=[p.strip().upper() for p in chord.split("+") if p.strip()]
     if not parts: fail("specify a key, such as ENTER, UP, or CTRL+C")
-    modifier=0
-    for part in parts[:-1]:
-        if part not in HID_MODIFIERS: fail(f"unknown modifier '{part}'")
-        modifier|=HID_MODIFIERS[part]
-    key=parts[-1]
-    if key not in HID_KEYS: fail(f"unknown key '{key}'; arrow keys: UP, DOWN, LEFT, RIGHT")
+    # A modifier by itself is a valid tap too (for example, WIN opens
+    # the host's Start/Super menu). Send it as a modifier-only HID report.
+    if len(parts) == 1 and parts[0] in HID_MODIFIERS:
+        modifier = HID_MODIFIERS[parts[0]]
+        keycode = 0
+    else:
+        modifier=0
+        for part in parts[:-1]:
+            if part not in HID_MODIFIERS: fail(f"unknown modifier '{part}'")
+            modifier|=HID_MODIFIERS[part]
+        key=parts[-1]
+        if key not in HID_KEYS: fail(f"unknown key '{key}'; arrow keys: UP, DOWN, LEFT, RIGHT")
+        keycode = HID_KEYS[key]
     fd=os.open(path,os.O_WRONLY)
-    try: hid_tap(fd,modifier,HID_KEYS[key])
+    try: hid_tap(fd,modifier,keycode)
     except OSError as exc: fail(f"keyboard write failed: {exc}",1)
     finally: os.close(fd)
 
