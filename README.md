@@ -99,8 +99,10 @@ After configuring a HID keyboard and applying the gadget, send input from the Pi
     sudo piasa keyboard key UP
     sudo piasa keyboard key CTRL+C
     sudo piasa keyboard key CTRL+ALT+DELETE
+    sudo piasa keyboard key WIN
+    sudo piasa keyboard key WIN+R
 
-Arrow keys are UP, DOWN, LEFT, and RIGHT. Other named keys include ENTER, TAB, ESC, BACKSPACE, DELETE, HOME, END, PAGEUP, PAGEDOWN, and F1 through F12. Modifier names include CTRL, SHIFT, ALT, and GUI. For multiple keyboards, pass --device NAME. Root is required to write to /dev/hidgX. Typing supports basic US-layout ASCII only; non-ASCII characters are not translated. The host must be connected and ready to receive input.
+Arrow keys are UP, DOWN, LEFT, and RIGHT. Other named keys include ENTER, TAB, ESC, BACKSPACE, DELETE, HOME, END, PAGEUP, PAGEDOWN, and F1 through F12. Modifier names include CTRL, SHIFT, ALT, and GUI/WIN (also WINDOWS, SUPER, and META). A modifier can be tapped on its own, for example `piasa keyboard key WIN`, or combined with another key. For multiple keyboards, pass --device NAME. Root is required to write to /dev/hidgX. Typing supports basic US-layout ASCII only; non-ASCII characters are not translated. The host must be connected and ready to receive input.
 
 ## USB descriptors and Ethernet MAC addresses
 
