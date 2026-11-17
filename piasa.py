@@ -74,6 +74,60 @@ def parse_assignments(tokens: list[str]) -> dict:
         values[key.replace("-", "_")] = value
     return values
 
+def first_time_setup() -> None:
+    """Prepare configfs and load the composite USB gadget module."""
+    require_root()
+
+    configfs = Path("/sys/kernel/config")
+    try:
+        configfs.mkdir(parents=True, exist_ok=True)
+        mounted = subprocess.run(
+            ["mountpoint", "-q", str(configfs)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        if not mounted:
+            subprocess.run(
+                ["mount", "-t", "configfs", "none", str(configfs)],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+
+        subprocess.run(
+            ["modprobe", "libcomposite"],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except FileNotFoundError as exc:
+        fail(f"required system command is missing: {exc.filename}; install kmod and util-linux")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        fail(f"could not initialize configfs/USB gadget support: {detail}")
+
+    gadget_root = configfs / "usb_gadget"
+    if not gadget_root.is_dir():
+        fail("libcomposite loaded, but /sys/kernel/config/usb_gadget was not created")
+
+    print("success: configfs mounted and libcomposite loaded")
+
+    # dwc2 is the peripheral controller driver used by common Raspberry Pi
+    # OTG setups. It is optional on other boards, so do not fail on its absence.
+    try:
+        subprocess.run(
+            ["modprobe", "dwc2"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+
+    udc_dir = Path("/sys/class/udc")
+    controllers = sorted(p.name for p in udc_dir.iterdir()) if udc_dir.exists() else []
+    if controllers:
+        print("success: USB Device Controller detected: " + ", ".join(controllers))
+    else:
+        print("warning: no USB Device Controller is registered yet.")
+        print("         On Raspberry Pi 4, connect through the USB-C port and")
+        print("         configure dtoverlay=dwc2,dr_mode=peripheral in config.txt,")
+        print("         then reboot. USB-A ports do not support gadget mode.")
+
+
 def init_composite() -> None:
     if CONFIG_FILE.exists():
         fail(f"configuration already exists at {CONFIG_FILE}; use 'piasa composite reset' to replace it")
