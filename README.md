@@ -36,13 +36,13 @@ piasa composite mouse template=mouse
 piasa composite show
 ```
 
-This creates a local configuration. It does **not** activate the USB gadget yet.
+The `--first-time` option prepares the system prerequisites: it mounts configfs if needed, loads `libcomposite`, attempts to load `dwc2`, checks for a registered USB Device Controller, and creates the composite configuration. It does **not** activate the USB gadget yet. If no UDC is found, PiAsA prints board-specific guidance; the required device-tree/boot configuration and USB port selection may still need manual setup.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `piasa --init composite` | Create a composite configuration |
+| `piasa --init composite` | Create a composite configuration |\n| `sudo piasa --init composite --first-time` | Mount configfs, load libcomposite, check UDC, and create the configuration |
 | `piasa composite show` | Display configuration, nmcli-style |
 | `piasa composite add device NAME --type TYPE` | Add a named function |
 | `piasa composite NAME key=value ...` | Set device properties |
